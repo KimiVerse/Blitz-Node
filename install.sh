@@ -11,14 +11,12 @@ define_colors() {
 }
 
 check_prerequisites() {
-    # Check for whiptail/dialog
     if ! command -v whiptail &> /dev/null; then
         echo -e "${yellow}Installing whiptail for interactive setup...${NC}"
         apt-get update >/dev/null 2>&1
         apt-get install -qq -y whiptail || { echo -e "${red}Error: Failed to install whiptail.${NC}"; exit 1; }
     fi
     
-    # Check OS version (Ubuntu >= 22.04)
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         if [ "$ID" != "ubuntu" ]; then
@@ -132,13 +130,24 @@ install_web_panel() {
     clear
     echo -e "${CYAN}--- Install Node Management Web Panel ---${NC}"
     
+    local install_status=1
+    
     if [[ -f /etc/hysteria/install_panel.sh ]]; then
         bash /etc/hysteria/install_panel.sh
+        install_status=$?
     else
-        echo -e "${RED}Error:${NC} Installation script install_panel.sh not found. This should not happen."
+        echo -e "${RED}Error:${NC} Installation script /etc/hysteria/install_panel.sh not found."
     fi
     
-    read -p "Press [Enter] to return to the menu..."
+    if [ $install_status -eq 0 ]; then
+        echo -e "${GREEN}Web Panel Installation completed successfully.${NC}"
+        echo -e "${LPurple}Run 'nodepanel' to manage the web panel.${NC}"
+    else
+        echo -e "${RED}Web Panel Installation FAILED.${NC}"
+        echo -e "${YELLOW}Please check the errors above and fix the configuration, then try again.${NC}"
+    fi
+
+    read -p "Press [Enter] to return to the main menu (nodehys2)..."
 }
 
 main_menu() {
@@ -199,7 +208,6 @@ install_hysteria() {
     local panel_url
     local panel_key
 
-    # TUI Inputs
     PORT=$(whiptail --inputbox "Enter Hysteria2 Port" 10 60 "$2" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then echo -e "${red}Installation cancelled.${NC}"; exit 1; fi
 
@@ -392,6 +400,11 @@ uninstall_hysteria() {
         echo -e "${green}✓${NC} Removed nodehys2 menu file"
     fi
     
+    # Attempt to uninstall web panel components
+    if [[ -f /etc/hysteria/install_panel.sh ]]; then
+        bash /etc/hysteria/install_panel.sh --uninstall >/dev/null 2>&1
+    fi
+
     bash <(curl -fsSL https://get.hy2.sh/) --remove >/dev/null 2>&1
     echo -e "${green}✓${NC} Removed Hysteria2 binary"
     
