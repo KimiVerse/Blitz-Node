@@ -1,48 +1,68 @@
-# Blitz Node - Hysteria2 Server Setup
+# 🚀 Blitz Node - Hysteria2 Server Setup  ✨ **Complete Hysteria2 node installation** with Panel integration, Authentication, and Traffic Tracking. Featuring an **Interactive TUI Setup** and a dedicated **Management Menu**.
 
-Complete Hysteria2 node installation with panel integration, authentication, and traffic tracking.
+---
 
-## Installation Steps
+## 🌟 Prerequisites
+
+| Component | Requirement | Note |
+| :---: | :---: | :--- |
+| **Operating System** | 🟢 Ubuntu Server **22.04+** | |
+| **User Access** | 👑 Root Access | |
+
+---
+
+## 📦 Installation Steps
 
 ### 1. Run Installer
-
-Clone this repository:
+Clone the repository and make the installer executable:
 
 ```bash
-git clone https://github.com/ReturnFI/Blitz-Node.git
+git clone https://github.com/KimiVerse/Blitz-Node.git
 cd Blitz-Node
-```
-
-Make the installer executable:
-
-```bash
 chmod +x install.sh
 ```
 
-Run the installer:
+Execute the installer, providing default values for the port and SNI:
 
 ```bash
 ./install.sh install <port> <sni>
 ```
 
-   Example:
+**Example:**
 
 ```bash
-./install.sh install 1239 example.com
+./install.sh install 443 panel.example.com
 ```
 
-### 2. Configure Panel API
+### 2. Interactive TUI Setup
+The installer will switch to a **Text-based User Interface (TUI)** for final configuration.
 
-During installation, provide:
-- **Panel URL**: `https://your-panel.com/your-path/`
-- **API Key**: Your panel authentication key
+---
 
-The installer automatically appends:
-- `/api/v1/users/` for user authentication
-- `/api/v1/config/ip/nodestraffic` for traffic reporting
+## ⚙️ Post-Installation Management (nodehys2 Menu)
 
-## Uninstall
+Once installed, run the following command for node management:
+
+```bash
+nodehys2
+```
+
+### Management Menu Options:
+
+| Option | Command | Description |
+| :---: | :--- | :--- |
+| **1** | Full Node Service Management | Control 🟢 **Start**, 🔴 **Stop**, 🔄 **Restart**, 📊 **Status**, and view 📜 **Logs** for all Hysteria2 services. |
+| **2** | Install Node Management Web Panel | **🚧 Under Development:** Future option to deploy a local web administration panel (FastAPI + Caddy). |
+| **3** | Exit Menu | 🚪 Closes the menu application. |
+
+---
+
+## 🗑️ Uninstall
+
+To completely and cleanly remove the Blitz Node installation:
 
 ```bash
 bash install.sh uninstall
 ```
+
+This command safely stops and removes all services, the Hysteria2 binary, the dedicated `hysteria` user, and the entire configuration directory (`/etc/hysteria`).
