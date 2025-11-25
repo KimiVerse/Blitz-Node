@@ -10,6 +10,184 @@ define_colors() {
     NC='\033[0m'
 }
 
+check_prerequisites() {
+    # Check for whiptail/dialog
+    if ! command -v whiptail &> /dev/null; then
+        echo -e "${yellow}Installing whiptail for interactive setup...${NC}"
+        apt-get update >/dev/null 2>&1
+        apt-get install -qq -y whiptail || { echo -e "${red}Error: Failed to install whiptail.${NC}"; exit 1; }
+    fi
+    
+    # Check OS version (Ubuntu >= 22.04)
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        if [ "$ID" != "ubuntu" ]; then
+            echo -e "${red}Error: This installer supports Ubuntu only. Detected OS: $ID.${NC}"
+            exit 1
+        fi
+        
+        MAJOR_VERSION=$(echo "$VERSION_ID" | cut -d '.' -f 1)
+        
+        if [ "$MAJOR_VERSION" -lt 22 ]; then
+            echo -e "${red}Error: Minimum required Ubuntu version is 22.04 (LTS). Your version is $VERSION_ID.${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${red}Error: Cannot determine OS information. Installation aborted.${NC}"
+        exit 1
+    fi
+}
+
+install_menu_script() {
+    local menu_file="/etc/hysteria/nodehys2.sh"
+    local executable_link="/usr/local/bin/nodehys2"
+    
+    echo "Creating 'nodehys2' management menu..."
+    
+    cat > "$menu_file" << 'EOF_MENU'
+#!/bin/bash
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+LPurple='\033[1;35m'
+NC='\033[0m'
+
+get_status() {
+    local service=$1
+    if systemctl is-active --quiet $service; then
+        echo -e "${GREEN}Active${NC}"
+    elif systemctl is-failed --quiet $service; then
+        echo -e "${RED}Failed${NC}"
+    else
+        echo -e "${YELLOW}Inactive${NC}"
+    fi
+}
+
+show_node_status() {
+    clear
+    echo -e "${CYAN}--- Hysteria2 Node Service Status ---${NC}"
+    echo -e "  Hysteria Server: $(get_status hysteria-server.service)"
+    echo -e "  Hysteria Auth:   $(get_status hysteria-auth.service)"
+    echo -e "  Hysteria Traffic: $(get_status hysteria-traffic.service)"
+    echo ""
+    read -p "Press [Enter] to return to the menu..."
+}
+
+manage_node_full() {
+    while true; do
+        clear
+        echo -e "${CYAN}--- Full Hysteria2 Node Management ---${NC}"
+        echo -e "1) ${GREEN}Restart All Services${NC}"
+        echo -e "2) ${RED}Stop All Services${NC}"
+        echo -e "3) ${GREEN}Start All Services${NC}"
+        echo -e "4) Show Node Status and Info"
+        echo -e "5) View Hysteria Server Log"
+        echo -e "6) Return to Main Menu"
+        echo -e "${CYAN}----------------------------------${NC}"
+        read -p "Please select an option: " manage_choice
+
+        case $manage_choice in
+            1)
+                echo -e "${YELLOW}Restarting services...${NC}"
+                systemctl restart hysteria-server.service hysteria-auth.service hysteria-traffic.service
+                echo -e "${GREEN}✓ Restart successful.${NC}"
+                sleep 2
+                ;;
+            2)
+                echo -e "${YELLOW}Stopping services...${NC}"
+                systemctl stop hysteria-server.service hysteria-auth.service hysteria-traffic.service
+                echo -e "${RED}✗ Services stopped.${NC}"
+                sleep 2
+                ;;
+            3)
+                echo -e "${YELLOW}Starting services...${NC}"
+                systemctl start hysteria-server.service hysteria-auth.service hysteria-traffic.service
+                echo -e "${GREEN}✓ Services started.${NC}"
+                sleep 2
+                ;;
+            4)
+                show_node_status
+                ;;
+            5)
+                clear
+                echo -e "${CYAN}--- Last 20 lines of hysteria-server log ---${NC}"
+                journalctl -u hysteria-server.service -n 20 --no-pager
+                read -p "Press [Enter] to return to the menu..."
+                ;;
+            6)
+                return
+                ;;
+            *)
+                echo -e "${RED}Invalid option!${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+install_web_panel() {
+    clear
+    echo -e "${CYAN}--- Install Node Management Web Panel ---${NC}"
+    
+    if [[ -f /etc/hysteria/install_panel.sh ]]; then
+        bash /etc/hysteria/install_panel.sh
+    else
+        echo -e "${YELLOW}Installation script install_panel.sh not found. This feature is under development.${NC}"
+    fi
+    
+    read -p "Press [Enter] to return to the menu..."
+}
+
+main_menu() {
+    while true; do
+        clear
+        echo -e "${CYAN}==================================${NC}"
+        echo -e "${CYAN}  Blitz-Node Hysteria2 Management Menu  ${NC}"
+        echo -e "${CYAN}==================================${NC}"
+        echo -e "1) ${LPurple}Full Node Service Management (Start, Stop, Status, Log)${NC}"
+        echo -e "2) Install Node Management Web Panel (FastAPI + Caddy)"
+        echo -e "3) ${RED}Exit Menu${NC}"
+        echo -e "${CYAN}----------------------------------${NC}"
+        read -p "Please select an option: " choice
+
+        case $choice in
+            1)
+                manage_node_full
+                ;;
+            2)
+                install_web_panel
+                ;;
+            3)
+                echo -e "${YELLOW}Exiting.${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid option!${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+main_menu
+EOF_MENU
+    
+    chown hysteria:hysteria "$menu_file" >/dev/null 2>&1
+    chmod 750 "$menu_file"
+    
+    if ! ln -s "$menu_file" "$executable_link" >/dev/null 2>&1; then
+        cat > "$executable_link" << EOF_WRAPPER
+#!/bin/bash
+exec $menu_file
+EOF_WRAPPER
+    fi
+    chmod +x "$executable_link"
+    
+    echo -e "${green}✓${NC} 'nodehys2' menu script installed."
+}
+
 install_hysteria() {
     local port=$1
     local sni=$2
@@ -20,35 +198,55 @@ install_hysteria() {
     local panel_url
     local panel_key
 
-    echo "Configuring Panel API..."
-    read -p "Enter panel API domain and path (e.g., https://example.com/path/): " panel_url
-    read -p "Enter panel API key: " panel_key
-    
-    if [[ -z "$panel_url" ]] || [[ -z "$panel_key" ]]; then
-        echo -e "${red}Error:${NC} Panel URL and API key are required"
+    # TUI Inputs
+    PORT=$(whiptail --inputbox "Enter Hysteria2 Port" 10 60 "$2" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then echo -e "${red}Installation cancelled.${NC}"; exit 1; fi
+
+    SNI=$(whiptail --inputbox "Enter SNI/Domain (e.g., example.com)" 10 60 "$3" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ]; then echo -e "${red}Installation cancelled.${NC}"; exit 1; fi
+
+    whiptail --msgbox "Next, enter the Panel API details (URL and Key)." 8 60 --title "Panel Configuration"
+
+    panel_url=$(whiptail --inputbox "Enter Panel API Domain and Path (e.g., https://panel.com/path/)" 10 70 --title "Panel URL" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ] || [ -z "$panel_url" ]; then echo -e "${red}Error: Panel URL required.${NC}"; exit 1; fi
+    panel_url="${panel_url%/}"
+
+    panel_key=$(whiptail --passwordbox "Enter Panel API Key" 10 70 --title "API Key" 3>&1 1>&2 2>&3)
+    if [ $? -ne 0 ] || [ -z "$panel_key" ]; then echo -e "${red}Error: Panel API Key required.${NC}"; exit 1; fi
+
+    whiptail --infobox "Starting Hysteria2 installation..." 8 60
+
+    if [[ ! $PORT =~ ^[0-9]+$ ]] || (( PORT < 1 || PORT > 65535 )); then
+        whiptail --msgbox "Error: Invalid port number. Please enter a number between 1 and 65535." 10 60
         exit 1
     fi
     
-    panel_url="${panel_url%/}"
+    if ss -tuln | grep -q ":$PORT "; then
+        whiptail --msgbox "Error: Port $PORT is already in use. Please choose another port." 10 60
+        exit 1
+    fi
+    
+    if ! id -u hysteria &> /dev/null; then
+        useradd -r -s /usr/sbin/nologin hysteria
+    fi
 
     echo "Cloning Blitz Node repository..."
     git clone https://github.com/ReturnFI/Blitz-Node /etc/hysteria >/dev/null 2>&1 || {
         echo -e "${red}Error:${NC} Failed to clone Blitz Node repository"
         exit 1
     }
-
-    echo "Installing Hysteria2..."
-    bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1
-    
     cd /etc/hysteria/
 
+    echo "Installing Hysteria2 binary..."
+    bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1
+    
     echo "Installing Python and dependencies..."
     apt-get update 
     apt-get install -qq -y python3 python3-venv python3-pip jq
 
     echo "Generating CA key and certificate..."
     openssl ecparam -genkey -name prime256v1 -out ca.key >/dev/null 2>&1
-    openssl req -new -x509 -days 36500 -key ca.key -out ca.crt -subj "/CN=$sni" >/dev/null 2>&1
+    openssl req -new -x509 -days 36500 -key ca.key -out ca.crt -subj "/CN=$SNI" >/dev/null 2>&1
     
     echo "Downloading geo data and config..."
     wget -O /etc/hysteria/config.json https://raw.githubusercontent.com/ReturnFI/Blitz/refs/heads/main/config.json >/dev/null 2>&1 || {
@@ -60,37 +258,20 @@ install_hysteria() {
 
     echo "Generating SHA-256 fingerprint..."
     sha256=$(openssl x509 -noout -fingerprint -sha256 -inform pem -in ca.crt | sed 's/.*=//' | tr '[:lower:]' '[:upper:]')
-
-    if [[ ! $port =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
-        echo -e "${red}Error:${NC} Invalid port number. Please enter a number between 1 and 65535."
-        exit 1
-    fi
-    
-    if ss -tuln | grep -q ":$port "; then
-        echo -e "${red}Error:${NC} Port $port is already in use. Please choose another port."
-        exit 1
-    fi
-
-    if ! id -u hysteria &> /dev/null; then
-        useradd -r -s /usr/sbin/nologin hysteria
-    fi
-
-    echo "Generating passwords and UUID..."
     obfspassword=$(openssl rand -base64 24)
     UUID=$(cat /proc/sys/kernel/random/uuid)
-    
     networkdef=$(ip route | grep "^default" | awk '{print $5}')
 
     chown hysteria:hysteria /etc/hysteria/ca.key /etc/hysteria/ca.crt
     chmod 640 /etc/hysteria/ca.key /etc/hysteria/ca.crt
 
     echo "Customizing config.json..."
-    jq --arg port "$port" \
+    jq --arg PORT "$PORT" \
        --arg sha256 "$sha256" \
        --arg obfspassword "$obfspassword" \
        --arg UUID "$UUID" \
        --arg networkdef "$networkdef" \
-       '.listen = (":" + $port) |
+       '.listen = (":" + $PORT) |
         .tls.cert = "/etc/hysteria/ca.crt" |
         .tls.key = "/etc/hysteria/ca.key" |
         .tls.pinSHA256 = $sha256 |
@@ -101,7 +282,7 @@ install_hysteria() {
         exit 1
     }
 
-    echo "Updating hysteria-server.service configuration..."
+    echo "Setting up Hysteria services..."
     if [[ -f /etc/systemd/system/hysteria-server.service ]]; then
         sed -i 's|/etc/hysteria/config.yaml|'"$CONFIG_FILE"'|g' /etc/systemd/system/hysteria-server.service
         [[ -f /etc/hysteria/config.yaml ]] && rm /etc/hysteria/config.yaml
@@ -112,11 +293,10 @@ install_hysteria() {
     systemctl restart hysteria-server.service >/dev/null 2>&1
     sleep 2
 
-    echo "Setting up Python virtual environment and services..."
+    echo "Setting up Python services (Auth/Traffic)..."
     python3 -m venv /etc/hysteria/blitz >/dev/null 2>&1
     /etc/hysteria/blitz/bin/pip install aiohttp >/dev/null 2>&1
     
-    echo "Creating .env configuration file..."
     cat > /etc/hysteria/.env <<EOF
 PANEL_API_URL=${panel_url}/api/v1/users/
 PANEL_TRAFFIC_URL=${panel_url}/api/v1/config/ip/nodestraffic
@@ -164,27 +344,19 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
 
-    chown hysteria:hysteria /etc/hysteria/blitz
+    chown hysteria:hysteria /etc/hysteria/blitz >/dev/null 2>&1
     chmod 750 /etc/hysteria/blitz
     systemctl daemon-reload >/dev/null 2>&1
     systemctl enable hysteria-auth.service hysteria-traffic.service >/dev/null 2>&1
     systemctl start hysteria-auth.service hysteria-traffic.service >/dev/null 2>&1
 
+    install_menu_script 
+
     if systemctl is-active --quiet hysteria-server.service; then
-        echo -e "${green}✓${NC} Hysteria2 installed successfully"
-        echo -e "${cyan}Port:${NC} $port"
-        echo -e "${cyan}SHA256:${NC} $sha256"
-        echo -e "${cyan}Obfs Password:${NC} $obfspassword"
-        echo ""
-        echo -e "${green}✓${NC} Auth and Traffic services configured"
-        echo -e "${green}✓${NC} Configuration saved to /etc/hysteria/.env"
-        echo ""
-        echo -e "Check service status:"
-        echo -e "  systemctl status hysteria-auth"
-        echo -e "  systemctl status hysteria-traffic"
+        whiptail --msgbox "Hysteria2 Node Installation Complete!\n\nPort: $PORT\nSHA256: $sha256\n\nTo manage the node, run the command 'nodehys2' in the terminal." 15 70 --title "Installation Success"
         return 0
     else
-        echo -e "${red}✗ Error:${NC} hysteria-server.service is not active"
+        whiptail --msgbox "Error: hysteria-server.service is not active. Check logs for details." 10 60 --title "Installation Failed"
         journalctl -u hysteria-server.service -n 20 --no-pager
         exit 1
     fi
@@ -210,17 +382,26 @@ uninstall_hysteria() {
         fi
     done
     
+    if [[ -f /usr/local/bin/nodehys2 ]]; then
+        rm /usr/local/bin/nodehys2 >/dev/null 2>&1
+        echo -e "${green}✓${NC} Removed nodehys2 executable link"
+    fi
+    if [[ -f /etc/hysteria/nodehys2.sh ]]; then
+        rm /etc/hysteria/nodehys2.sh >/dev/null 2>&1
+        echo -e "${green}✓${NC} Removed nodehys2 menu file"
+    fi
+    
     bash <(curl -fsSL https://get.hy2.sh/) --remove >/dev/null 2>&1
     echo -e "${green}✓${NC} Removed Hysteria2 binary"
-    
-    if [[ -d /etc/hysteria ]]; then
-        rm -rf /etc/hysteria
-        echo -e "${green}✓${NC} Removed /etc/hysteria directory"
-    fi
     
     if id -u hysteria &> /dev/null; then
         userdel hysteria >/dev/null 2>&1
         echo -e "${green}✓${NC} Removed hysteria user"
+    fi
+
+    if [[ -d /etc/hysteria ]]; then
+        rm -rf /etc/hysteria
+        echo -e "${green}✓${NC} Removed /etc/hysteria directory"
     fi
     
     systemctl daemon-reload >/dev/null 2>&1
@@ -244,9 +425,9 @@ define_colors
 
 case "${1:-}" in
     install)
+        check_prerequisites
         if [[ -z "$2" ]] || [[ -z "$3" ]]; then
-            echo -e "${red}Error:${NC} Port and SNI required"
-            show_usage
+            whiptail --msgbox "Error: Port and SNI required in arguments.\nUsage: $0 install <port> <sni>" 10 60
             exit 1
         fi
         if systemctl is-active --quiet hysteria-server.service; then
