@@ -38,6 +38,7 @@ check_prerequisites() {
     fi
 }
 
+
 install_menu_script() {
     local menu_file="/etc/hysteria/nodehys2.sh"
     local executable_link="/usr/local/bin/nodehys2"
@@ -134,7 +135,7 @@ install_web_panel() {
     if [[ -f /etc/hysteria/install_panel.sh ]]; then
         bash /etc/hysteria/install_panel.sh
     else
-        echo -e "${YELLOW}Installation script install_panel.sh not found. This feature is under development.${NC}"
+        echo -e "${RED}Error:${NC} Installation script install_panel.sh not found. This should not happen."
     fi
     
     read -p "Press [Enter] to return to the menu..."
