@@ -245,6 +245,13 @@ install_hysteria() {
         exit 1
     }
     cd /etc/hysteria/
+    
+    echo "Downloading web panel installer..."
+    wget -O /etc/hysteria/install_panel.sh https://raw.githubusercontent.com/KimiVerse/Blitz-Node/main/install_panel.sh >/dev/null 2>&1 || {
+        echo -e "${red}Error:${NC} Failed to download install_panel.sh"
+        exit 1
+    }
+    chmod +x /etc/hysteria/install_panel.sh
 
     echo "Installing Hysteria2 binary..."
     bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1
