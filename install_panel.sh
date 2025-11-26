@@ -317,7 +317,8 @@ setup_frontend() {
             const result = await apiCall(\`logs/\${service}?lines=50\`);
             
             if (result.logs) {
-                logContent.textContent = result.logs;
+                l
+                ogContent.textContent = result.logs;
             } else {
                 logContent.textContent = result.message || 'Failed to load logs.';
             }
@@ -339,18 +340,35 @@ setup_caddy() {
 
     cat > "/etc/caddy/Caddyfile" << EOF_CADDY
 $PANEL_USER_DOMAIN:$FASTAPI_PORT {
+    # Set the root for static files (index.html)
     root *$INSTALL_DIR/web_panel
     
+    # Set a simple security header
     header /* X-Frame-Options DENY
     
+    # Define the matcher for API calls that include the random path
     @api_calls {
         path /$RANDOM_PATH/api/*
     }
-    rewrite @api_calls /$RANDOM_PATH/api(.*) /api\$1
 
-    reverse_proxy @api_calls 127.0.0.1:$FASTAPI_PORT
-    
-    handle_path / {
+    # Handle the API calls:
+    handle @api_calls {
+        # 1. Remove the random path prefix (e.g., /random/api/status -> /api/status)
+        uri strip_prefix /$RANDOM_PATH
+        
+        # 2. Proxy the modified path to the internal FastAPI server
+        reverse_proxy 127.0.0.1:$FASTAPI_PORT
+    }
+
+    # Handle all other requests (the random path itself for index.html)
+    handle_path /$RANDOM_PATH {
+        file_server {
+            index index.html
+        }
+    }
+
+    # Default handle for root access (optional, can be disabled for security)
+    handle / {
         file_server {
             index index.html
         }
@@ -377,6 +395,7 @@ EOF_CADDY
     echo -e "${GREEN}✓${NC} Caddy configured and running on ${PANEL_USER_DOMAIN}:${FASTAPI_PORT}.${NC}"
     return 0
 }
+
 create_panel_menu() {
     local menu_file="/usr/local/bin/nodepanel"
     
