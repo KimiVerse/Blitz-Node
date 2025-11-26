@@ -439,15 +439,11 @@ define_colors
 case "${1:-}" in
     install)
         check_prerequisites
-        if [[ -z "$2" ]] || [[ -z "$3" ]]; then
-            whiptail --msgbox "Error: Port and SNI required in arguments.\nUsage: $0 install <port> <sni>" 10 60
-            exit 1
-        fi
         if systemctl is-active --quiet hysteria-server.service; then
             echo -e "${red}✗ Error:${NC} Hysteria2 is already installed and running"
             exit 1
         fi
-        install_hysteria "$2" "$3"
+        install_hysteria "" ""
         ;;
     uninstall)
         if ! systemctl is-active --quiet hysteria-server.service && [[ ! -d /etc/hysteria ]]; then
