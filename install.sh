@@ -208,10 +208,10 @@ install_hysteria() {
     local panel_url
     local panel_key
 
-    PORT=$(whiptail --inputbox "Enter Hysteria2 Port" 10 60 "$2" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
+    PORT=$(whiptail --inputbox "Enter Hysteria2 Port" 10 60 "443" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then echo -e "${red}Installation cancelled.${NC}"; exit 1; fi
 
-    SNI=$(whiptail --inputbox "Enter SNI/Domain (e.g., example.com)" 10 60 "$3" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
+    SNI=$(whiptail --inputbox "Enter SNI/Domain (e.g., example.com)" 10 60 "example.com" --title "Hysteria2 Setup" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ]; then echo -e "${red}Installation cancelled.${NC}"; exit 1; fi
 
     whiptail --msgbox "Next, enter the Panel API details (URL and Key)." 8 60 --title "Panel Configuration"
@@ -365,9 +365,9 @@ EOF
         whiptail --msgbox "Hysteria2 Node Installation Complete!\n\nPort: $PORT\nSHA256: $sha256\n\nTo manage the node, run the command 'nodehys2' in the terminal." 15 70 --title "Installation Success"
         return 0
     else
-        whiptail --msgbox "Error: hysteria-server.service is not active. Check logs for details." 10 60 --title "Installation Failed"
+        whiptail --msgbox "Warning: Hysteria2 service failed to start. Installation completed, but service is not active. Use 'nodehys2' to manage." 15 70 --title "Installation Warning"
         journalctl -u hysteria-server.service -n 20 --no-pager
-        exit 1
+        return 0
     fi
 }
 
@@ -400,7 +400,6 @@ uninstall_hysteria() {
         echo -e "${green}✓${NC} Removed nodehys2 menu file"
     fi
     
-    # Attempt to uninstall web panel components
     if [[ -f /etc/hysteria/install_panel.sh ]]; then
         bash /etc/hysteria/install_panel.sh --uninstall >/dev/null 2>&1
     fi
