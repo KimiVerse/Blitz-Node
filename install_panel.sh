@@ -33,18 +33,16 @@ install_caddy() {
 }
 
 validate_and_get_inputs() {
-    # 1. Get Domain (TUI)
-    PANEL_USER_DOMAIN=$(whiptail --inputbox "Enter Domain for Web Panel (e.g., panel.yourdomain.com)" 10 70 "$PANEL_USER_DOMAIN" --title "Web Panel Domain Setup" 3>&1 1>&2 2>&3)
+    PANEL_USER_DOMAIN=$(whiptail --inputbox "Enter Domain or Public IP for Web Panel Access" 10 70 "$PANEL_USER_DOMAIN" --title "Web Panel Access Host" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ] || [ -z "$PANEL_USER_DOMAIN" ]; then
-        whiptail --msgbox "Error: Web Panel Domain is required." 10 60
+        whiptail --msgbox "Error: Web Panel Host (Domain/IP) is required." 10 60
         return 1
     fi
     PANEL_USER_DOMAIN=$(echo "$PANEL_USER_DOMAIN" | tr '[:upper:]' '[:lower:]')
 
-    # 2. Get Internal FastAPI Port (TUI)
-    FASTAPI_PORT=$(whiptail --inputbox "Enter Internal Port for FastAPI (e.g., 8000). Caddy will proxy to this port." 10 70 "$FASTAPI_PORT_DEFAULT" --title "FastAPI Port Setup" 3>&1 1>&2 2>&3)
+    FASTAPI_PORT=$(whiptail --inputbox "Enter Port for Panel Access (This will be the external Caddy port and internal FastAPI port)" 10 70 "$FASTAPI_PORT_DEFAULT" --title "Panel Access Port" 3>&1 1>&2 2>&3)
     if [ $? -ne 0 ] || [ -z "$FASTAPI_PORT" ]; then
-        whiptail --msgbox "Error: FastAPI Port is required." 10 60
+        whiptail --msgbox "Error: Panel Access Port is required." 10 60
         return 1
     fi
     
@@ -58,7 +56,6 @@ validate_and_get_inputs() {
         return 1
     fi
 
-    # 3. Generate Random Path
     RANDOM_PATH=$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 16)
     
     return 0
@@ -338,31 +335,21 @@ EOF_HTML
 }
 
 setup_caddy() {
-    echo -e "${CYAN}Configuring Caddy with domain: ${PANEL_USER_DOMAIN}...${NC}"
+    echo -e "${CYAN}Configuring Caddy with host: ${PANEL_USER_DOMAIN}:${FASTAPI_PORT}...${NC}"
 
-    # 1. Write Caddyfile
     cat > "/etc/caddy/Caddyfile" << EOF_CADDY
-$PANEL_USER_DOMAIN:443 {
-    # Set the root for static files (index.html)
+$PANEL_USER_DOMAIN:$FASTAPI_PORT {
     root *$INSTALL_DIR/web_panel
     
-    # Set a simple security header
     header /* X-Frame-Options DENY
     
-    # Handle the random path for API and serve the static files for the rest
-
-    # Rewrite API access from /random_path/api to the internal /api
-    rewrite /$RANDOM_PATH/api* /api{uri}
-
-    # Reverse proxy the internal /api to FastAPI
     @api_calls {
-        path /api/*
+        path /$RANDOM_PATH/api/*
     }
-    reverse_proxy @api_calls 127.0.0.1:$FASTAPI_PORT {
-        # Caddy will only proxy /api calls
-    }
+    rewrite @api_calls /$RANDOM_PATH/api(.*) /api\$1
 
-    # Serve index.html for the root access path and the random path itself
+    reverse_proxy @api_calls 127.0.0.1:$FASTAPI_PORT
+    
     handle_path / {
         file_server {
             index index.html
@@ -371,7 +358,6 @@ $PANEL_USER_DOMAIN:443 {
 }
 EOF_CADDY
 
-    # 2. Test and Reload Caddy
     caddy fmt --overwrite /etc/caddy/Caddyfile >/dev/null 2>&1
     caddy validate --config /etc/caddy/Caddyfile
     if [ $? -ne 0 ]; then
@@ -380,30 +366,28 @@ EOF_CADDY
     fi
     
     systemctl start caddy
-    sleep 10 # Wait for Caddy to attempt SSL issuance
+    sleep 3
 
-    # 3. Check for SSL success
-    if ! caddy validate --config /etc/caddy/Caddyfile; then
-        echo -e "${RED}Fatal Error:${NC} Caddy failed to obtain SSL certificate for ${PANEL_USER_DOMAIN} on port 443.${NC}"
-        echo -e "${RED}Action: Check DNS A/CNAME record and firewall (ports 80 and 443 must be open). Installation aborted.${NC}"
-        systemctl stop caddy
+    if ! systemctl is-active --quiet caddy.service; then
+        echo -e "${RED}Fatal Error:${NC} Caddy failed to start on port ${FASTAPI_PORT}. Check firewall rules.${NC}"
+        journalctl -u caddy.service -n 10 --no-pager
         return 1
     fi
 
-    echo -e "${GREEN}✓${NC} Caddy configured and running with SSL for ${PANEL_USER_DOMAIN}.${NC}"
+    echo -e "${GREEN}✓${NC} Caddy configured and running on ${PANEL_USER_DOMAIN}:${FASTAPI_PORT}.${NC}"
     return 0
 }
-
 create_panel_menu() {
     local menu_file="/usr/local/bin/nodepanel"
     
     echo -e "${CYAN}Creating Web Panel Management Menu...${NC}"
     
-    # Get current Admin Key for display
     local ADMIN_KEY_ENV
     if [ -f "$INSTALL_DIR/.env" ]; then
         ADMIN_KEY_ENV=$(grep PANEL_API_KEY "$INSTALL_DIR/.env" | cut -d '=' -f 2)
     fi
+
+    local PANEL_URL="http://${PANEL_USER_DOMAIN}:${FASTAPI_PORT}/$RANDOM_PATH"
 
     cat > "$menu_file" << EOF_MENU
 #!/bin/bash
@@ -412,7 +396,7 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 PANEL_DOMAIN="${PANEL_USER_DOMAIN}"
-PANEL_URL="https://${PANEL_USER_DOMAIN}/$RANDOM_PATH"
+PANEL_URL="${PANEL_URL}"
 PANEL_KEY="${ADMIN_KEY_ENV}"
 FASTAPI_INTERNAL_PORT="$FASTAPI_PORT"
 
